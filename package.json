@@ -1,0 +1,28 @@
+{
+  "name": "cyan-household",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"node --watch server/index.js\" \"vite --host 127.0.0.1\"",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "test": "node --test server/*.test.js",
+    "test:accounts": "RUN_ACCOUNT_INTEGRATION=1 node --test server/accounts.integration.test.js",
+    "seed:demo": "node server/seed-demo.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "lucide-react": "^0.468.0",
+    "pg": "^8.16.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.0",
+    "concurrently": "^9.2.1",
+    "vite": "^7.2.2"
+  }
+}

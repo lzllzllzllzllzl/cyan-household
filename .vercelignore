@@ -1,0 +1,7 @@
+.env
+.env.*
+!.env.example
+.tools
+.trae-html-share-packages
+server/*.test.js
+server/*.integration.test.js
