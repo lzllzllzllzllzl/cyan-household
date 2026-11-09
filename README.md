@@ -2,6 +2,10 @@
 
 An English-language course prototype for **ECOM7121, Cyan — Climbing Cat**. The goal is to reduce avoidable household food waste and duplicate buying through a clearer inventory and human-approved meal planning.
 
+**Live application:** https://cyan-household.vercel.app
+
+**Source repository:** https://github.com/lzllzllzllzllzl/cyan-household (private).
+
 ## Run locally
 
 ```bash
@@ -53,6 +57,8 @@ Configure these server-side variables in Vercel for Production and Preview:
 No Neon administrative API key is needed to run the application. Do not prefix secrets with `VITE_`; they must stay on the server. Preview and Production use the same database unless a separate Preview connection string is configured.
 
 Connect the GitHub repository in Vercel. Pushes to `main` deploy Production; other branches create Preview deployments. The existing sample account and all registered users persist in Neon across deployments.
+
+The production project uses Node.js 24. Production and Preview have all four variables configured as Secrets. GitHub is connected to the Vercel project `cyan-household`.
 
 ## What works
 
