@@ -100,6 +100,24 @@ test('Register, use, sign out, sign in again, and isolate two Neon accounts', {
     assert.equal(restored.messages[0].content, 'Account A private message');
     assert.equal(restored.feedback.length, 1);
     assert.equal((await b.request('/auth/me')).data.account.username, nameB);
+    const beforeBatch = Date.now();
+    const undated = await a.request('/items', { confirmed: true, items: [
+      { ...food, name: 'Fresh undated apples', expiry_date: null, date_type: 'Unknown', created_at: '2000-01-01T00:00:00Z' },
+      { ...food, name: 'Fresh undated carrots', expiry_date: null, date_type: 'Unknown' },
+    ] });
+    assert.equal(undated.status, 201);
+    const batch = (await a.request('/state')).data.items.filter(i => undated.data.ids.includes(i.id));
+    assert.equal(batch.length, 2);
+    for (const i of batch) {
+      assert.equal(i.expiry_date, null);
+      assert.equal(i.date_type, 'Unknown');
+      assert.ok(Date.parse(i.created_at) >= beforeBatch - 1000);
+      assert.ok(Date.parse(i.created_at) <= Date.now());
+    }
+    assert.equal(batch[0].created_at, batch[1].created_at);
+    const corrected = { ...batch[0], quantity: 4 };
+    assert.equal((await a.request(`/items/${corrected.id}`, corrected, 'PATCH')).status, 200);
+    assert.equal((await a.request('/state')).data.items.find(i => i.id === corrected.id).created_at, batch[0].created_at);
     const sampleOwner = (await pool.query('SELECT id FROM cyan_users WHERE household_id=$1', ['11111111-1111-4111-8111-111111111111'])).rows[0];
     if (sampleOwner) {
       const demo = client();

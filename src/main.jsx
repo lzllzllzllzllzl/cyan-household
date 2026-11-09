@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Leaf, LayoutDashboard, Package, UtensilsCrossed, Sparkles, Settings2, ArrowUpRight,
@@ -23,6 +23,7 @@ const RECIPE_PHOTOS = [
 ];
 const days = (item, date) => item.expiry_date ? Math.round((Date.parse(item.expiry_date) - Date.parse(date)) / 86400000) : null;
 const quantity = number => new Intl.NumberFormat('en', { maximumFractionDigits: 2 }).format(number);
+const recordedDate = (timestamp, timezone) => new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(timestamp ? new Date(timestamp) : new Date());
 async function api(path, body, method = 'POST') {
   const response = await fetch(`/api${path}`, { method: body === undefined ? 'GET' : method, headers: { 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const result = response.headers.get('content-type')?.includes('application/json')
@@ -69,6 +70,8 @@ function Modal({ title, subtitle, children, onClose, wide = false }) {
   </div>;
 }
 function ItemFields({ item, onChange, compact = false }) {
+  const [showDate, setShowDate] = useState(Boolean(item.expiry_date));
+  const dateFieldsId = useId();
   const set = (key, value) => onChange({ ...item, [key]: value });
   return <div className={`form-grid ${compact ? 'compact' : ''}`}>
     <label className="span-2">Food name<input required maxLength={80} value={item.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Cherry tomatoes" /></label>
@@ -76,19 +79,29 @@ function ItemFields({ item, onChange, compact = false }) {
     <label>Storage<select value={item.location} onChange={e => set('location', e.target.value)}>{['Fridge', 'Freezer', 'Pantry', 'Counter'].map(c => <option key={c}>{c}</option>)}</select></label>
     <label>Quantity<input type="number" min=".01" max="100000" step="any" required value={item.quantity} onChange={e => set('quantity', Number(e.target.value))} /></label>
     <label>Unit<select value={item.unit} onChange={e => set('unit', e.target.value)}>{UNITS.map(c => <option key={c}>{c}</option>)}</select></label>
-    <label>Printed date<input type="date" value={item.expiry_date || ''} onChange={e => onChange({ ...item, expiry_date: e.target.value || null, date_type: e.target.value ? (item.date_type === 'Unknown' ? 'Best before' : item.date_type) : 'Unknown' })} /></label>
-    <label>Date label<select value={item.date_type} onChange={e => set('date_type', e.target.value)}>{['Unknown', 'Use by', 'Best before'].map(c => <option key={c}>{c}</option>)}</select></label>
+    <div className="span-2 package-date-section">
+      <button className="text-button package-date-toggle" type="button" aria-expanded={showDate} aria-controls={dateFieldsId} onClick={() => setShowDate(!showDate)}><ChevronDown size={15} />Package expiry date (optional){!showDate && item.expiry_date && <span>{item.expiry_date}</span>}</button>
+      {showDate && <div id={dateFieldsId} className="form-grid">
+        <label>Expiry date on packaging<input type="text" lang="en" inputMode="numeric" placeholder="YYYY-MM-DD" pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}" title="Use YYYY-MM-DD, for example 2026-11-20." maxLength={10} value={item.expiry_date || ''} onChange={e => onChange({ ...item, expiry_date: e.target.value || null, date_type: e.target.value ? (item.date_type === 'Unknown' ? 'Best before' : item.date_type) : 'Unknown' })} /></label>
+        <label>Package date label<select value={item.date_type} onChange={e => set('date_type', e.target.value)}>{['Unknown', 'Use by', 'Best before'].map(c => <option key={c}>{c}</option>)}</select></label>
+        <small className="span-2">Use the date printed on the package. Leave blank if there is no date; you can still save this food.</small>
+      </div>}
+    </div>
     <label>Condition<select value={item.safety_status} onChange={e => set('safety_status', e.target.value)}><option>Normal</option><option>Check needed</option></select></label>
     <label>Notes<input maxLength={300} value={item.notes} onChange={e => set('notes', e.target.value)} placeholder="Storage or label details" /></label>
     <fieldset className="span-2 allergen-field"><legend>Allergens — check the packaging</legend><div className="check-chips">{ALLERGENS.map(a => <label key={a}><input type="checkbox" checked={item.allergens.includes(a)} onChange={e => set('allergens', e.target.checked ? [...item.allergens, a] : item.allergens.filter(x => x !== a))} />{a}</label>)}</div></fieldset>
   </div>;
 }
-function AddModal({ edit, onClose, run }) {
+function RecordingDate({ timestamp, timezone, batch = false }) {
+  return <div className="recording-date"><Clock3 size={18} /><div><span>{timestamp ? 'Recorded on' : 'Recording date'} <strong>{recordedDate(timestamp, timezone)}</strong></span><small>{timestamp ? 'Saved automatically when this food was added.' : batch ? 'Today is saved automatically for every item in this batch. No date entry needed.' : 'Today is saved automatically when you add this food.'}</small></div></div>;
+}
+function AddModal({ edit, onClose, run, state }) {
   const [item, setItem] = useState(edit || blankItem());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  return <Modal title={edit ? 'Edit food item' : 'A new addition to your kitchen'} subtitle="Check the package date and quantity. Every purchase is saved as its own batch." onClose={onClose}>
+  return <Modal title={edit ? 'Edit food item' : 'A new addition to your kitchen'} subtitle="Check the food and quantity. Package expiry dates are optional." onClose={onClose}>
     <form onSubmit={async e => { e.preventDefault(); setBusy(true); setError(''); try { await run(edit ? `/items/${edit.id}` : '/items', edit ? item : { confirmed: true, items: [item] }, edit ? 'PATCH' : 'POST'); onClose(); } catch (e) { setError(e.message); } finally { setBusy(false); } }}>
+      <RecordingDate timestamp={edit?.created_at} timezone={state.profile.timezone} />
       <ItemFields item={item} onChange={setItem} />
       <p className="info-line"><ShieldCheck size={16} /> Dates organize your food; they do not establish food safety.</p>
       {error && <p className="error" role="alert">{error}</p>}
@@ -120,6 +133,7 @@ function ScanModal({ onClose, run, state }) {
       {error && <p className="error" role="alert">{error}</p>}
       <div className="modal-actions"><Button variant="secondary" type="button" onClick={onClose}>Cancel</Button><Button disabled={busy || (!image && !description)}>{busy ? <LoaderCircle className="spin" size={16} /> : <ScanLine size={16} />}{busy ? 'Preparing draft…' : 'Identify groceries'}</Button></div>
     </form> : <form onSubmit={async e => { e.preventDefault(); setBusy(true); setError(''); try { await run('/items', { confirmed: true, source: result.source, items: result.items }); onClose(); } catch (e) { setError(e.message); } finally { setBusy(false); } }}>
+      <RecordingDate timezone={state.profile.timezone} batch />
       <p className="review-warning"><AlertTriangle size={16} />{result.warning}</p>
       {result.items.map((item, index) => <div className="review-item" key={index}><div className="section-row"><h3>Item {index + 1}</h3><button className="text-button" type="button" onClick={() => setResult({ ...result, items: result.items.filter((_, i) => i !== index) })}><Trash2 size={15} />Remove</button></div><ItemFields compact item={item} onChange={newItem => setResult({ ...result, items: result.items.map((i, n) => n === index ? newItem : i) })} /></div>)}
       {!result.items.length && <p className="empty">No food items in this draft. Try another photo or add them manually.</p>}
@@ -143,16 +157,17 @@ function AdjustModal({ item, onClose, run }) {
   </Modal>;
 }
 function InventoryTable({ items, state, onEdit, onAdjust, limit }) {
-  return <div className="table-wrap"><table><thead><tr><th>Food item</th><th>Quantity</th><th>Storage</th><th>Package date</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
+  return <div className="table-wrap"><table><thead><tr><th>Food item</th><th>Quantity</th><th>Storage</th><th>Recorded on</th><th>Package date</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
     {items.slice(0, limit || items.length).map(item => <tr key={item.id}>
       <td><div className="food-cell"><span className={`food-icon cat-${CATEGORIES.indexOf(item.category)}`}>{ICONS[item.category]}</span><div><strong>{item.name}</strong><small>{item.category}{item.source.includes('Demo') ? ' · Sample' : ''}</small></div></div></td>
       <td>{quantity(item.quantity)} <span className="muted">{item.unit}</span></td>
       <td><span className="storage"><Refrigerator size={13} />{item.location}</span></td>
+      <td><time dateTime={item.created_at}>{recordedDate(item.created_at, state.profile.timezone)}</time></td>
       <td>{item.expiry_date ? <><span>{new Date(`${item.expiry_date}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span><small>{days(item, state.today) < 0 ? 'Past recorded date' : days(item, state.today) === 0 ? 'Today' : `${days(item, state.today)} days left`}</small></> : <span className="muted">Check label</span>}</td>
       <td><Badge status={item.status} /></td>
       <td><div className="row-actions"><button className="icon-button" title="Edit item" aria-label={`Edit ${item.name}`} onClick={() => onEdit(item)}><Pencil size={14} /></button><button className="icon-button" title="Use or discard" aria-label={`Update stock for ${item.name}`} onClick={() => onAdjust(item)}><Minus size={16} /></button></div></td>
     </tr>)}
-    {!items.length && <tr><td colSpan={6}><div className="empty"><Package size={30} /><p>No food here yet. Add your first grocery haul.</p></div></td></tr>}
+    {!items.length && <tr><td colSpan={7}><div className="empty"><Package size={30} /><p>No food here yet. Add your first grocery haul.</p></div></td></tr>}
   </tbody></table></div>;
 }
 function RecipeCard({ recipe, index, state, onOpen }) {
@@ -367,8 +382,8 @@ function App() {
       {view === 'settings' && <HouseholdSettings state={state} run={run} />}
       {view === 'activity' && <Activity state={state} run={run} />}
     </main><footer><span>© {new Date().getFullYear()} Cyan · Climbing Cat</span><span>Thoughtful kitchens. Less avoidable waste.</span><button onClick={() => navigate('activity')}><ShieldCheck size={13} />Human-led by design</button></footer></div>
-    {modal?.type === 'add' && <AddModal onClose={() => setModal(null)} run={run} />}
-    {modal?.type === 'edit' && <AddModal edit={modal.item} onClose={() => setModal(null)} run={run} />}
+    {modal?.type === 'add' && <AddModal state={state} onClose={() => setModal(null)} run={run} />}
+    {modal?.type === 'edit' && <AddModal state={state} edit={modal.item} onClose={() => setModal(null)} run={run} />}
     {modal?.type === 'scan' && <ScanModal state={state} onClose={() => setModal(null)} run={run} />}
     {modal?.type === 'adjust' && <AdjustModal item={modal.item} onClose={() => setModal(null)} run={run} />}
     {modal?.type === 'recipe' && <RecipeModal recipe={modal.recipe} state={state} onClose={() => setModal(null)} run={run} />}

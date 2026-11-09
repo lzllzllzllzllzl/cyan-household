@@ -64,6 +64,7 @@ The production project uses Node.js 24. Production and Preview have all four var
 
 - Account registration, sign-in, persistent sessions, sign-out, and separate data for every account.
 - Persistent inventory: categories, batch quantities, units, storage locations, package dates, date labels, allergen labels and condition flags.
+- Recording dates are saved automatically by Neon when food is added, using the household time zone for display. A recognition batch shows today's recording date once; no per-item date entry is needed. Package expiry dates are separate, optional fields with an English `YYYY-MM-DD` placeholder.
 - Add and edit food; log use or discard; searchable and filterable inventory.
 - Upload a grocery image, receipt, or text description; review and correct recognition drafts before saving.
 - Use-first reminders in the dashboard and notification panel.
