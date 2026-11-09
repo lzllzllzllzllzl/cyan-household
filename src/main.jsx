@@ -18,7 +18,6 @@ const UNITS = ['pcs', 'g', 'kg', 'ml', 'L', 'packs'];
 const ALLERGENS = ['Milk', 'Eggs', 'Fish', 'Shellfish', 'Wheat', 'Soy', 'Peanuts', 'Tree nuts', 'Sesame'];
 const ICONS = { Vegetables: '🥬', Fruit: '🍋', 'Dairy & eggs': '🥚', Protein: '🍗', Drinks: '🥛', Pantry: '🌾' };
 const blankItem = () => ({ name: '', category: 'Vegetables', quantity: 1, unit: 'pcs', location: 'Fridge', expiry_date: null, date_type: 'Unknown', allergens: [], safety_status: 'Normal', condition_reviewed: false, notes: '' });
-const photo = prompt => `https://copilot-cn.bytedance.net/api/ide/v1/text_to_image?prompt=${encodeURIComponent(`${prompt}, editorial food photography, natural window light, warm cream background, realistic, beautifully styled, no text, no watermark`)}&image_size=landscape_4_3`;
 const canCook = (recipe, state) => { try { validateRecipe(recipe, state.items, state.profile, state.today); return true; } catch { return false; } };
 const days = (item, date) => item.expiry_date ? Math.round((Date.parse(item.expiry_date) - Date.parse(date)) / 86400000) : null;
 const quantity = number => new Intl.NumberFormat('en', { maximumFractionDigits: 2 }).format(number);
@@ -279,7 +278,7 @@ function AuthScreen({ onAuthenticated }) {
     <section className="auth-story">
       <a href="/" className="brand auth-brand"><span className="brand-mark"><Leaf size={23} /></span>cyan<span className="brand-period">.</span></a>
       <div className="auth-story-copy"><span className="eyebrow">A LITTLE LESS WASTE. A LITTLE MORE GOOD.</span><h1>Good things<br />start at home<span>.</span></h1><p>Your own kitchen inventory. Thoughtful meal ideas.<br />A little more room for everyday living.</p></div>
-      <div className="auth-photo"><img src={photo('A sunlit home kitchen counter with a paper grocery bag, fresh tomatoes, bananas, leafy spinach and lemons, warm natural materials, wide editorial composition')} alt="Fresh groceries on a sunlit kitchen counter" /><span><Leaf size={15} />Make the most of what’s already here.</span></div>
+      <div className="auth-photo"><img src="/kitchen-hero.webp" alt="Fresh groceries on a sunlit kitchen counter" /><span><Leaf size={15} />Make the most of what’s already here.</span></div>
       <div className="auth-story-footer"><span>Cyan · Climbing Cat</span><span>Thoughtful kitchens, one household at a time.</span></div>
     </section>
     <section className="auth-main"><div className="auth-form-wrap">

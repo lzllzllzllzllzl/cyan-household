@@ -127,6 +127,8 @@ Recipe planning uses 16 ingredient/preparation templates in `recipe-catalog.js`.
 
 Photos are generated once, visually reviewed, then compressed into `public/recipes`. They are not generated during requests or stored as base64 in Neon. The server chooses their static URL from ingredients and preparation, ignoring model-provided URLs. Unmatched dishes use a clearly labeled ingredient illustration. `generate-recipe-photos.py` is an optional maintenance script for the text-to-image endpoint, requiring Pillow; it rejects the service's temporary generation image. Normal development does not need it.
 
+The login illustration is also a static asset (`public/kitchen-hero.webp`). All food photos ship with the Vercel deployment and load from the application's own public origin, without ByteDance authentication or a runtime image-generation service. Base64 is not needed for public access; it is an encoding rather than a hosting or access-control mechanism. First-time access to the hosted website still requires an internet connection.
+
 Verification: `npm test` runs nine unit tests for credentials, password hashing, inventory and meal restrictions. With the server running, `npm run test:accounts` registers two temporary accounts, checks session revocation and data isolation, verifies food persists through logout/login, then removes only its own fixtures.
 
 Source files: `src/main.jsx`, `src/styles.css`, `src/auth.css`, `server/index.js`, `server/auth.js`, `server/db.js`, `server/ai.js`, and `server/domain.js`.
