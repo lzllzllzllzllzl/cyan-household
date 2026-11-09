@@ -6,6 +6,7 @@ import { pool, legacyHousehold, initialize, transaction, log, getItems, getProfi
 import { authRouter, requireAccount } from './auth.js';
 import { itemSchema, profileSchema, itemStatus, today, validateRecipe, effectiveAllergens } from './domain.js';
 import { aiEnabled, recognize, makeRecipes, chat } from './ai.js';
+import { recipeImage } from '../recipe-catalog.js';
 
 const app = express();
 if (process.env.VERCEL) app.set('trust proxy', 1);
@@ -38,7 +39,7 @@ app.get('/api/state', async (req, res) => {
   const activity = (await pool.query('SELECT * FROM cyan_activity WHERE household_id=$1 ORDER BY created_at DESC LIMIT 50', [household])).rows;
   const messages = (await pool.query('SELECT * FROM (SELECT * FROM cyan_messages WHERE household_id=$1 ORDER BY created_at DESC LIMIT 30) recent ORDER BY created_at', [household])).rows;
   const feedback = (await pool.query('SELECT * FROM cyan_feedback WHERE household_id=$1 ORDER BY created_at DESC LIMIT 20', [household])).rows;
-  res.json({ account: { id: req.account.id, username: req.account.username }, profile, items, recipes, activity, messages, feedback, today: currentDate, connection: { database: 'Neon PostgreSQL', connected: true, ai: aiEnabled(), model: aiEnabled() ? (process.env.AI_MODEL || 'gpt-4o-mini') : null }, demo: household === legacyHousehold });
+  res.json({ account: { id: req.account.id, username: req.account.username }, profile, items, recipes: recipes.map(r => ({ ...r, data: { ...r.data, ...recipeImage(r.data, items) } })), activity, messages, feedback, today: currentDate, connection: { database: 'Neon PostgreSQL', connected: true, ai: aiEnabled(), model: aiEnabled() ? (process.env.AI_MODEL || 'gpt-4o-mini') : null }, demo: household === legacyHousehold });
 });
 app.post('/api/items', async (req, res) => {
   const household = req.account.household_id;
@@ -46,10 +47,10 @@ app.post('/api/items', async (req, res) => {
   const ids = await transaction(async client => {
     const ids = [];
     for (const item of input.items) {
-      const result = await client.query(`INSERT INTO cyan_items (household_id,name,category,quantity,unit,location,expiry_date,date_type,allergens,safety_status,notes,source)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, [
+      const result = await client.query(`INSERT INTO cyan_items (household_id,name,category,quantity,unit,location,expiry_date,date_type,allergens,safety_status,notes,source,condition_reviewed)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`, [
         household, item.name, item.category, item.quantity, item.unit, item.location, item.expiry_date,
-        item.date_type, JSON.stringify(effectiveAllergens(item)), item.safety_status, item.notes, input.source,
+        item.date_type, JSON.stringify(effectiveAllergens(item)), item.safety_status, item.notes, input.source, item.condition_reviewed,
       ]);
       ids.push(result.rows[0].id);
     }
@@ -69,8 +70,8 @@ app.patch('/api/items/:id', async (req, res) => {
       const error = new Error('Cyan does not remove or extend a recorded package date. Keep the printed date; create a new batch for a new purchase.');
       error.status = 422; throw error;
     }
-    await client.query(`UPDATE cyan_items SET name=$1,category=$2,quantity=$3,unit=$4,location=$5,expiry_date=$6,date_type=$7,allergens=$8,safety_status=$9,notes=$10 WHERE id=$11 AND household_id=$12`,
-      [item.name, item.category, item.quantity, item.unit, item.location, item.expiry_date, item.date_type, JSON.stringify(effectiveAllergens(item)), item.safety_status, item.notes, req.params.id, household]);
+    await client.query(`UPDATE cyan_items SET name=$1,category=$2,quantity=$3,unit=$4,location=$5,expiry_date=$6,date_type=$7,allergens=$8,safety_status=$9,notes=$10,condition_reviewed=$13 WHERE id=$11 AND household_id=$12`,
+      [item.name, item.category, item.quantity, item.unit, item.location, item.expiry_date, item.date_type, JSON.stringify(effectiveAllergens(item)), item.safety_status, item.notes, req.params.id, household, item.condition_reviewed]);
     await log(client, household, 'Inventory corrected', `${item.name}: ${item.quantity} ${item.unit}; ${item.safety_status}.`);
   });
   if (!res.headersSent) res.json({ ok: true });
@@ -96,6 +97,9 @@ app.post('/api/recipes/generate', async (req, res) => {
   const profile = await getProfile(household);
   const output = await makeRecipes(await getItems(household), profile);
   await transaction(async client => {
+    const currentItems = await getItems(household, client, true);
+    const currentProfile = await getProfile(household, client);
+    for (const recipe of output.recipes) validateRecipe(recipe, currentItems, currentProfile);
     // Old alternatives are replaced as one atomic operation.
     await client.query('DELETE FROM cyan_recipes WHERE household_id=$1 AND cooked_at IS NULL', [household]);
     for (const recipe of output.recipes) await client.query('INSERT INTO cyan_recipes (household_id,data,source) VALUES ($1,$2,$3)', [household, JSON.stringify(recipe), output.source]);

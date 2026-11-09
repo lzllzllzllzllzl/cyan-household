@@ -68,7 +68,7 @@ The production project uses Node.js 24. Production and Preview have all four var
 - Add and edit food; log use or discard; searchable and filterable inventory.
 - Upload a grocery image, receipt, or text description; review and correct recognition drafts before saving.
 - Use-first reminders in the dashboard and notification panel.
-- Meal suggestions from available, dated stock and approved wellbeing preferences.
+- Meal suggestions from available stock with a current package date or explicit condition/storage review, and approved wellbeing preferences.
 - Confirm a cooked meal to deduct ingredients in a PostgreSQL transaction. Stock, date status, condition and preferences are checked again at cooking time. Duplicate recording is rejected.
 - English assistant chat with inventory context and human approval for proposed preference changes.
 - Household preferences, time zone, activity trail, and feedback queued for human review.
@@ -102,7 +102,7 @@ These are three **bounded operational roles**, not autonomous background agents:
 | D2 — Approval / stop | Explicit preference approval and cooked-meal confirmation | Server validates restrictions and stock again |
 | E — Feedback / learning | Audit trail and pending feedback | Feedback is evidence for human review; it is not automatic learning |
 
-No scheduled reminders, automatic purchases, sharing, food rescue deliveries or deployment are included. Dates organize stock; neither dates nor photos establish food safety. Past-date, undated and flagged items are excluded from plans. Recorded dates cannot be removed or extended through editing. New purchases are separate batches.
+No scheduled reminders, automatic purchases, sharing or food rescue deliveries are included. Dates organize stock; neither dates nor photos establish food safety. Past-date and flagged items are excluded from plans. Undated food requires explicit condition/storage review in the item form; recognition never grants that review. Recording dates never become expiry dates. Recorded package dates cannot be removed or extended through editing. New purchases are separate batches.
 
 Allergens are checked against stored labels and conservative food-name matches. This is not a complete allergen database and cannot verify traces, cross-contamination or storage. Health suggestions are general inspiration, not clinical advice or calculated nutritional targets.
 
@@ -121,7 +121,11 @@ Possible evaluation measures: inventory correction rate, time spent reviewing re
 
 React + Vite frontend, Express API, Zod validation, and PostgreSQL via Neon. Database tables are prefixed `cyan_`, including `cyan_users` and `cyan_sessions`. Secrets are excluded by `.gitignore`; model calls are server-side; SQL values use parameters. The server binds to localhost and checks browser origins.
 
-This version supports a separate kitchen for each registered account. Shared-account membership, email verification and password recovery are outside this version's scope. Hosting remains local. Generated recipe photography is decorative, not evidence of the suggested meal's exact ingredients. It and Google Fonts require network access; text and inventory controls do not depend on these assets.
+This version supports a separate kitchen for each registered account. Shared-account membership, email verification and password recovery are outside this version's scope. Hosting uses Vercel with Neon storage. Recipe photography is illustrative, not evidence of the suggested meal's exact ingredients. Recipe images are compressed static WebP assets served by the app; Google Fonts still requires network access.
+
+Recipe planning uses 16 ingredient/preparation templates in `recipe-catalog.js`. All core ingredients must be eligible and in stock. The text model selects candidates and adjusts portions and instructions; the API checks candidate identity, ingredient IDs, units, quantities, allergies and diet. If no template matches, the model can suggest a snack or side using available food. Invalid responses or provider failures fall back to inventory rules. Suggestions are separate alternatives; cooking revalidates against current inventory and preferences.
+
+Photos are generated once, visually reviewed, then compressed into `public/recipes`. They are not generated during requests or stored as base64 in Neon. The server chooses their static URL from ingredients and preparation, ignoring model-provided URLs. Unmatched dishes use a clearly labeled ingredient illustration. `generate-recipe-photos.py` is an optional maintenance script for the text-to-image endpoint, requiring Pillow; it rejects the service's temporary generation image. Normal development does not need it.
 
 Verification: `npm test` runs nine unit tests for credentials, password hashing, inventory and meal restrictions. With the server running, `npm run test:accounts` registers two temporary accounts, checks session revocation and data isolation, verifies food persists through logout/login, then removes only its own fixtures.
 

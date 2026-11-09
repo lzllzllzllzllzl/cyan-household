@@ -74,6 +74,7 @@ export async function initialize() {
       created_at timestamptz NOT NULL DEFAULT now()
     );
   `);
+  await pool.query('ALTER TABLE cyan_items ADD COLUMN IF NOT EXISTS condition_reviewed boolean NOT NULL DEFAULT false');
   await transaction(async client => {
     const inserted = await client.query('INSERT INTO cyan_households (id,profile) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING id', [
       legacyHousehold, JSON.stringify({ household_name: 'The Green House', household_size: 2, diet: 'Balanced', goal: 'Everyday wellbeing', allergies: [], dislikes: '', timezone: 'Asia/Hong_Kong' }),

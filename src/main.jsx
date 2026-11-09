@@ -9,18 +9,17 @@ import {
 } from 'lucide-react';
 import './styles.css';
 import './auth.css';
+import './recipes.css';
+import { validateRecipe } from '../server/domain.js';
+import { recipeImage } from '../recipe-catalog.js';
 
 const CATEGORIES = ['Vegetables', 'Fruit', 'Dairy & eggs', 'Protein', 'Drinks', 'Pantry'];
 const UNITS = ['pcs', 'g', 'kg', 'ml', 'L', 'packs'];
 const ALLERGENS = ['Milk', 'Eggs', 'Fish', 'Shellfish', 'Wheat', 'Soy', 'Peanuts', 'Tree nuts', 'Sesame'];
 const ICONS = { Vegetables: '🥬', Fruit: '🍋', 'Dairy & eggs': '🥚', Protein: '🍗', Drinks: '🥛', Pantry: '🌾' };
-const blankItem = () => ({ name: '', category: 'Vegetables', quantity: 1, unit: 'pcs', location: 'Fridge', expiry_date: null, date_type: 'Unknown', allergens: [], safety_status: 'Normal', notes: '' });
+const blankItem = () => ({ name: '', category: 'Vegetables', quantity: 1, unit: 'pcs', location: 'Fridge', expiry_date: null, date_type: 'Unknown', allergens: [], safety_status: 'Normal', condition_reviewed: false, notes: '' });
 const photo = prompt => `https://copilot-cn.bytedance.net/api/ide/v1/text_to_image?prompt=${encodeURIComponent(`${prompt}, editorial food photography, natural window light, warm cream background, realistic, beautifully styled, no text, no watermark`)}&image_size=landscape_4_3`;
-const RECIPE_PHOTOS = [
-  photo('Overhead photograph of spinach cherry tomato and egg skillet, rustic ceramic pan, fresh herbs'),
-  photo('Healthy lemon chicken broccoli brown rice bowl, white handmade ceramic bowl'),
-  photo('Banana greek yogurt rolled oats breakfast bowl, creamy texture, wooden table'),
-];
+const canCook = (recipe, state) => { try { validateRecipe(recipe, state.items, state.profile, state.today); return true; } catch { return false; } };
 const days = (item, date) => item.expiry_date ? Math.round((Date.parse(item.expiry_date) - Date.parse(date)) / 86400000) : null;
 const quantity = number => new Intl.NumberFormat('en', { maximumFractionDigits: 2 }).format(number);
 const recordedDate = (timestamp, timezone) => new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(timestamp ? new Date(timestamp) : new Date());
@@ -89,6 +88,7 @@ function ItemFields({ item, onChange, compact = false }) {
     </div>
     <label>Condition<select value={item.safety_status} onChange={e => set('safety_status', e.target.value)}><option>Normal</option><option>Check needed</option></select></label>
     <label>Notes<input maxLength={300} value={item.notes} onChange={e => set('notes', e.target.value)} placeholder="Storage or label details" /></label>
+    {!item.expiry_date && <label className="span-2 confirm-checkbox"><input type="checkbox" checked={Boolean(item.condition_reviewed)} onChange={e => set('condition_reviewed', e.target.checked)} />I checked this food’s condition and storage and want to include it in meal ideas. This does not set an expiry date.</label>}
     <fieldset className="span-2 allergen-field"><legend>Allergens — check the packaging</legend><div className="check-chips">{ALLERGENS.map(a => <label key={a}><input type="checkbox" checked={item.allergens.includes(a)} onChange={e => set('allergens', e.target.checked ? [...item.allergens, a] : item.allergens.filter(x => x !== a))} />{a}</label>)}</div></fieldset>
   </div>;
 }
@@ -172,11 +172,11 @@ function InventoryTable({ items, state, onEdit, onAdjust, limit }) {
 }
 function RecipeCard({ recipe, index, state, onOpen }) {
   const r = recipe.data;
-  const available = r.ingredients.every(x => state.items.some(i => i.id === x.item_id && i.quantity >= x.quantity && ['In date', 'Use first'].includes(i.status) && !i.allergens.some(a => state.profile.allergies.includes(a))));
+  const available = canCook(r, state);
   const useFirst = r.ingredients.filter(x => state.items.find(i => i.id === x.item_id)?.status === 'Use first').length;
-  const pictureIndex = /yogurt|banana|breakfast/i.test(r.title) ? 2 : /chicken/i.test(r.title) ? 1 : 0;
+  const image = recipeImage(r, state.items);
   return <button className="recipe-card" onClick={() => onOpen(recipe)}>
-    <div className="recipe-image"><img src={RECIPE_PHOTOS[pictureIndex]} alt={r.title} loading="lazy" /><span className="recipe-label">{!available ? 'Review required' : useFirst ? <><Leaf size={12} /> Uses {useFirst} use-first {useFirst === 1 ? 'item' : 'items'}</> : <><Heart size={12} /> Made for your kitchen</>}</span><div className="recipe-open"><ArrowUpRight size={18} /></div></div>
+    <div className="recipe-image"><img src={image.image_url} alt={image.image_alt} loading="lazy" /><span className="photo-caption">{image.image_label}</span><span className="recipe-label">{!available ? 'Review required' : useFirst ? <><Leaf size={12} /> Uses {useFirst} use-first {useFirst === 1 ? 'item' : 'items'}</> : <><Heart size={12} /> Made for your kitchen</>}</span><div className="recipe-open"><ArrowUpRight size={18} /></div></div>
     <div className="recipe-body"><div className="recipe-meta"><span><Clock3 size={13} />{r.minutes} min</span><span>{r.servings} {r.servings === 1 ? 'serving' : 'servings'}</span></div><h3>{r.title}</h3><p>{r.description}</p><div className="recipe-tags">{r.tags.slice(0, 2).map(t => <span key={t}>{t}</span>)}</div></div>
   </button>;
 }
@@ -185,12 +185,16 @@ function RecipeModal({ recipe, state, onClose, run }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const r = recipe.data;
+  const image = recipeImage(r, state.items);
+  const available = canCook(r, state);
   return <Modal title={r.title} subtitle={`${r.minutes} minutes · ${r.servings} ${r.servings === 1 ? 'serving' : 'servings'} · ${recipe.source}`} onClose={onClose} wide>
+    <figure className="recipe-detail-photo"><img src={image.image_url} alt={image.image_alt} /><figcaption>{image.image_label}</figcaption></figure>
+    {!available && <p className="error" role="alert">This idea needs review: stock, food condition, dates or preferences have changed. Update your inventory or prepare new ideas.</p>}
     <p>{r.description}</p><div className="recipe-detail-grid"><section><h3>From your kitchen</h3>{r.ingredients.map(x => { const i = state.items.find(i => i.id === x.item_id); return <div className="ingredient" key={x.item_id}><span>{i?.name || 'Item no longer available'}</span><strong>{quantity(x.quantity)} {x.unit}</strong></div>; })}<div className="health-note"><Heart size={18} /><p>{r.health_note}</p></div></section><section><h3>Let’s make it</h3><ol className="recipe-steps">{r.steps.map((step, i) => <li key={i}>{step}</li>)}</ol></section></div>
     <div className="notice"><ShieldCheck size={18} /><p>Check food condition, storage, package instructions, and allergens before cooking. Date status is not a safety guarantee. This is general meal inspiration.</p></div>
     <label className="confirm-checkbox"><input type="checkbox" checked={approved} onChange={e => setApproved(e.target.checked)} />I cooked this meal and used the ingredient quantities shown above.</label>
     {error && <p className="error" role="alert">{error}</p>}
-    <div className="modal-actions"><Button variant="secondary" onClick={onClose}>Keep as an idea</Button><Button disabled={!approved || busy} onClick={async () => { setBusy(true); try { await run(`/recipes/${recipe.id}/cook`, { confirmed: true }); onClose(); } catch (e) { setError(e.message); } finally { setBusy(false); } }}>{busy ? <LoaderCircle size={16} className="spin" /> : <Check size={16} />}Record meal & update stock</Button></div>
+    <div className="modal-actions"><Button variant="secondary" onClick={onClose}>Keep as an idea</Button><Button disabled={!available || !approved || busy} onClick={async () => { setBusy(true); try { await run(`/recipes/${recipe.id}/cook`, { confirmed: true }); onClose(); } catch (e) { setError(e.message); } finally { setBusy(false); } }}>{busy ? <LoaderCircle size={16} className="spin" /> : <Check size={16} />}Record meal & update stock</Button></div>
   </Modal>;
 }
 function Overview({ state, setView, setModal, generate, generating }) {
@@ -219,14 +223,14 @@ function Inventory({ state, setModal, search, setSearch }) {
   return <><div className="page-heading"><div className="eyebrow">KNOW WHAT YOU HAVE</div><h1>Your kitchen inventory<span>.</span></h1><p>Every ingredient, every batch. A clearer picture of what’s at home.</p><div className="heading-actions"><Button variant="secondary" onClick={() => setModal({ type: 'scan' })}><ScanLine size={16} />Scan groceries</Button><Button onClick={() => setModal({ type: 'add' })}><Plus size={16} />Add food</Button></div></div>
     <div className="category-tabs">{['All food', ...CATEGORIES].map(c => <button key={c} className={category === c ? 'selected' : ''} onClick={() => setCategory(c)}>{c !== 'All food' && <span>{ICONS[c]}</span>}{c}<small>{state.items.filter(i => c === 'All food' || i.category === c).length}</small></button>)}</div>
     <section className="panel"><div className="inventory-filters"><div className="search-field"><Search size={16} /><input aria-label="Search food inventory" placeholder="Find something in your kitchen..." value={search} onChange={e => setSearch(e.target.value)} /></div><select aria-label="Filter food status" value={status} onChange={e => setStatus(e.target.value)}>{['All statuses', 'Use first', 'In date', 'Past date', 'Date unknown', 'Check needed'].map(c => <option key={c}>{c}</option>)}</select><select aria-label="Filter storage" value={location} onChange={e => setLocation(e.target.value)}>{['All storage', 'Fridge', 'Freezer', 'Pantry', 'Counter'].map(c => <option key={c}>{c}</option>)}</select></div><InventoryTable items={filtered} state={state} onEdit={i => setModal({ type: 'edit', item: i })} onAdjust={i => setModal({ type: 'adjust', item: i })} /><div className="table-footer"><span>{filtered.length} food batches</span><span>Each purchase keeps its own package date.</span></div></section>
-    <div className="notice standalone"><ShieldCheck size={18} /><p>“Use first” means the recorded package date is within 3 days. Check storage and condition yourself. Past-date, flagged, and undated items are excluded from meal planning.</p></div></>;
+    <div className="notice standalone"><ShieldCheck size={18} /><p>“Use first” means the recorded package date is within 3 days. Past-date and flagged food stays out of planning. For food without a package date, open Edit and confirm its condition and storage to include it.</p></div></>;
 }
 function Meals({ state, setModal, generate, generating, setView }) {
   return <><div className="page-heading"><div className="eyebrow">MAKE THE MOST OF WHAT’S HERE</div><h1>Good ideas, already at home<span>.</span></h1><p>Meals shaped by your ingredients, your preferences, and what needs using first.</p><div className="heading-actions"><Button disabled={generating} onClick={generate}>{generating ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}{generating ? 'Preparing ideas…' : 'Refresh meal ideas'}</Button></div></div>
     <div className="meal-preferences"><Heart size={20} /><div><strong>{state.profile.diet} · {state.profile.goal}</strong><p>{state.profile.allergies.length ? `Excluding: ${state.profile.allergies.join(', ')}` : 'No allergen exclusions saved. Add yours before planning.'}</p></div><button className="text-button" onClick={() => setView('settings')}>Edit preferences <ArrowRight size={15} /></button></div>
     {!state.connection.ai && <div className="notice standalone"><Sparkles size={18} /><p>Demo recipe rules are active. These sample plans match available inventory; they are not generated by a live model. Each plan is an alternative, and stock is checked again when you record cooking.</p></div>}
-    {state.recipes.length ? <div className="recipe-grid meals-page">{state.recipes.map((r, i) => <RecipeCard key={r.id} recipe={r} index={i} state={state} onOpen={r => setModal({ type: 'recipe', recipe: r })} />)}</div> : <div className="panel empty tall"><UtensilsCrossed size={42} /><h2>Your next meal starts here.</h2><p>Save confirmed food dates and prepare your first meal ideas.</p><Button disabled={generating} onClick={generate}>Prepare meal ideas <Sparkles size={16} /></Button></div>}
-    <section className="how-it-works"><div><span>01</span><h3>Start with your kitchen</h3><p>Only in-stock, dated ingredients are included. Flagged items stay out.</p></div><div><span>02</span><h3>Make it yours</h3><p>Diet, allergen exclusions, and wellbeing goals shape the suggestions.</p></div><div><span>03</span><h3>You have the final say</h3><p>Review the plan. After cooking, confirm the quantities you used.</p></div></section></>;
+    {state.recipes.length ? <div className="recipe-grid meals-page">{state.recipes.map((r, i) => <RecipeCard key={r.id} recipe={r} index={i} state={state} onOpen={r => setModal({ type: 'recipe', recipe: r })} />)}</div> : <div className="panel empty tall"><UtensilsCrossed size={42} /><h2>Your next meal starts here.</h2><p>Add food with a package date, or confirm condition and storage for undated food in Inventory. Ideas respect your saved preferences.</p><Button disabled={generating} onClick={generate}>Prepare meal ideas <Sparkles size={16} /></Button></div>}
+    <section className="how-it-works"><div><span>01</span><h3>Start with your kitchen</h3><p>In-stock food with a current package date or your explicit condition review can be included. Flagged food stays out.</p></div><div><span>02</span><h3>Make it yours</h3><p>Ingredient rules select dishes; text AI adjusts the plan. Photos are serving inspiration.</p></div><div><span>03</span><h3>You have the final say</h3><p>Review the plan. After cooking, confirm the quantities you used.</p></div></section></>;
 }
 function Assistant({ state, run, refresh }) {
   const [message, setMessage] = useState('');

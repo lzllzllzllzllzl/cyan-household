@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { itemSchema, recipeSchema, eligibleItems, today, demoRecipes, validateRecipe, allergens } from './domain.js';
+import { itemSchema, recipeSchema, eligibleItems, today, demoRecipes, validateRecipe, allergens, ruleRecipes } from './domain.js';
 
 export const aiEnabled = () => Boolean(process.env.AI_API_KEY);
 async function completion(messages) {
@@ -41,22 +41,42 @@ export async function recognize(image, text) {
   if (image) content.push({ type: 'image_url', image_url: { url: image } });
   const output = await completion([{ role: 'system', content: governance }, { role: 'user', content }]);
   const parsed = z.object({ items: z.array(itemSchema).max(20) }).parse(output);
-  return { ...parsed, source: 'AI detection', warning: 'AI quantities and labels are estimates. Verify the food, printed date, allergens, and storage before confirming.' };
+  return { items: parsed.items.map(i => ({ ...i, condition_reviewed: false })), source: 'AI detection', warning: 'AI quantities and labels are estimates. Verify the food, printed date, allergens, and storage before confirming.' };
 }
 export async function makeRecipes(items, profile) {
   if (!aiEnabled()) return { recipes: demoRecipes(items, profile), source: 'Demo recipe rules' };
   const eligible = eligibleItems(items, profile);
   if (!eligible.length) return { recipes: [], source: 'AI meal planner' };
+  const candidates = ruleRecipes(items, profile).slice(0, 8);
+  try {
   const output = await completion([
     { role: 'system', content: governance },
     { role: 'user', content: `Make up to 3 different meal ideas using ONLY these eligible inventory items: ${JSON.stringify(eligible)}.
     Today: ${today(profile.timezone)}. Preferences: ${JSON.stringify(profile)}.
     Prioritize earliest dates, respect diet, dislikes and allergies, and do not introduce unlisted ingredients in steps.
+    ${candidates.length ? `Return at most ${Math.min(3, candidates.length)} recipes. Select different candidates from ${JSON.stringify(candidates)}. Each template_id may appear ONLY ONCE; do not create portion variants. Keep their template_id, title, and every required ingredient ID. You may add optional ingredients ONLY from the eligible inventory, using exact IDs and stock units. Adapt quantities, timings, descriptions and steps to the inventory and preferences. Do not change the preparation type.` : 'No catalog recipe matches. Create honest snack, side or meal ideas; do not pretend a single ingredient is a complete meal. Omit template_id.'}
     Quantities must use each item's exact unit and must not exceed stock. Each recipe is a separate alternative.
-    No calorie or medical claims. Give general wellbeing notes. Return {"recipes":[{"title":"","description":"","minutes":15,"servings":1,"ingredients":[{"item_id":"exact uuid","quantity":1,"unit":"exact inventory unit"}],"steps":[""],"health_note":"","tags":[""]}]}.` },
+    No calorie or medical claims. Give general wellbeing notes. Return {"recipes":[{"template_id":"exact candidate template_id when candidates exist; otherwise omit","title":"exact candidate title when candidates exist","description":"","minutes":15,"servings":1,"ingredients":[{"item_id":"exact uuid","quantity":1,"unit":"exact inventory unit"}],"steps":[""],"health_note":"","tags":[""]}]}.` },
   ]);
   const parsed = z.object({ recipes: z.array(recipeSchema).max(3) }).parse(output);
-  return { recipes: parsed.recipes.map(r => validateRecipe(r, items, profile)), source: 'AI meal planner' };
+  if (!parsed.recipes.length) throw new Error('No meal ideas returned.');
+  const seen = new Set();
+  const distinct = [];
+  for (const r of parsed.recipes) {
+    if (!candidates.length) { delete r.template_id; distinct.push(r); continue; }
+    const candidate = candidates.find(c => c.template_id === r.template_id);
+    if (!candidate || r.title !== candidate.title
+      || !candidate.ingredients.every(required => r.ingredients.some(i => i.item_id === required.item_id))) throw new Error('Recipe does not match an allowed candidate.');
+    if (seen.has(r.template_id)) continue;
+    seen.add(r.template_id);
+    distinct.push(r);
+  }
+  return { recipes: distinct.map(r => validateRecipe(r, items, profile)), source: 'AI + inventory recipe rules' };
+  } catch (error) {
+    // A provider failure or invalid response never replaces useful plans with
+    // unrestricted output. Safe rules still work without the model.
+    return { recipes: demoRecipes(items, profile), source: 'Inventory recipe rules · AI unavailable or response not validated' };
+  }
 }
 const patchSchema = z.object({
   diet: z.enum(['Balanced', 'Vegetarian', 'Vegan', 'Pescatarian']).optional(),
@@ -78,7 +98,7 @@ export async function chat(message, history, items, profile) {
     const names = safe.slice(0, 3).map(i => i.name.toLowerCase()).join(', ');
     let reply = Object.keys(patch).length
       ? 'I can use these preferences in your next meal plan. Review the proposed changes below and approve them before they are saved.'
-      : `You have ${safe.length} dated items eligible for planning${names ? `, including ${names}` : ''}. Start with the earliest dates in your inventory, then open Meal ideas for a plan using what you have.`;
+      : `You have ${safe.length} reviewed items eligible for planning${names ? `, including ${names}` : ''}. Start with the earliest dates in your inventory, then open Meal ideas for a plan using what you have.`;
     if (/safe|spoiled|smell|expired|extend|past.*date/i.test(message)) reply = 'I cannot establish food safety or extend a printed date. If food is past its use-by date, has uncertain storage, or appears spoiled, leave it out of meal planning and follow local food-safety guidance. You can mark the item “Check needed” in Inventory.';
     if (/diabet|disease|diagnos|medicine|pregnan|blood pressure/i.test(message)) reply = 'I can help with general food preferences, but I cannot diagnose conditions or provide a medical diet. Ask a qualified professional about your specific needs. You can save allergies and general preferences in Household settings.';
     return { reply, proposed_profile: Object.keys(patch).length ? patch : null, source: 'Demo assistant' };

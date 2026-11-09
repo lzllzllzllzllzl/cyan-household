@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { recipeCatalog, foodGroups, recipeImage } from '../recipe-catalog.js';
 
 export const categories = ['Vegetables', 'Fruit', 'Dairy & eggs', 'Protein', 'Drinks', 'Pantry'];
 export const units = ['pcs', 'g', 'kg', 'ml', 'L', 'packs'];
@@ -18,6 +19,7 @@ export const itemSchema = z.object({
   date_type: z.enum(['Use by', 'Best before', 'Unknown']),
   allergens: z.array(z.enum(allergens)).max(9).default([]),
   safety_status: z.enum(['Normal', 'Check needed']).default('Normal'),
+  condition_reviewed: z.boolean().default(false),
   notes: z.string().max(300).default(''),
 }).refine(i => i.expiry_date === null || i.date_type !== 'Unknown', 'Specify the date label when entering a date.');
 
@@ -61,7 +63,7 @@ export function effectiveAllergens(item) {
 export function eligibleItems(items, profile, currentDate = today(profile.timezone)) {
   const dislikes = profile.dislikes.toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
   return items.filter(i => {
-    if (Number(i.quantity) <= 0 || i.safety_status !== 'Normal' || daysLeft(i, currentDate) === null || daysLeft(i, currentDate) < 0) return false;
+    if (Number(i.quantity) <= 0 || i.safety_status !== 'Normal' || (!i.expiry_date && !i.condition_reviewed) || (i.expiry_date && daysLeft(i, currentDate) < 0)) return false;
     if (effectiveAllergens(i).some(a => profile.allergies.includes(a))) return false;
     if (dislikes.some(d => i.name.toLowerCase().includes(d))) return false;
     if (['Vegetarian', 'Vegan'].includes(profile.diet) && /chicken|beef|pork|fish|salmon|tuna|shrimp|prawn|turkey|lamb/i.test(i.name)) return false;
@@ -79,6 +81,7 @@ export const recipeSchema = z.object({
   steps: z.array(z.string().min(1).max(500)).min(1).max(10),
   health_note: z.string().max(400),
   tags: z.array(z.string().max(30)).max(5),
+  template_id: z.string().max(60).optional(),
 });
 export function validateRecipe(recipe, items, profile, currentDate = today(profile.timezone)) {
   const parsed = recipeSchema.parse(recipe);
@@ -87,13 +90,40 @@ export function validateRecipe(recipe, items, profile, currentDate = today(profi
   for (const ingredient of parsed.ingredients) {
     const item = allowed.get(ingredient.item_id);
     if (!item || seen.has(item.id) || ingredient.unit !== item.unit || ingredient.quantity > Number(item.quantity)) {
-      throw new Error('This plan uses unavailable or restricted food. Review inventory and preferences.');
+      const error = new Error('This plan uses unavailable or restricted food. Review inventory and preferences.');
+      error.status = 422;
+      throw error;
     }
     seen.add(item.id);
   }
-  return parsed;
+  return { ...parsed, ...recipeImage(parsed, items) };
+}
+export function ruleRecipes(items, profile) {
+  const available = eligibleItems(items, profile).sort((a, b) => (daysLeft(a) ?? Infinity) - (daysLeft(b) ?? Infinity));
+  const amount = i => Math.min(Number(i.quantity), ({ pcs: 1, g: 100, kg: 0.1, ml: 150, L: 0.15, packs: 0.5 })[i.unit]);
+  const recipes = recipeCatalog.flatMap(t => {
+    const matched = t.groups.map(g => available.find(i => foodGroups[g].test(i.name)));
+    if (matched.some(i => !i) || new Set(matched.map(i => i.id)).size !== matched.length) return [];
+    return [validateRecipe({
+      template_id: t.id, title: t.title, description: 'A simple idea built around ingredients already in your kitchen.',
+      minutes: t.minutes, servings: 1,
+      ingredients: matched.map(i => ({ item_id: i.id, quantity: amount(i), unit: i.unit })),
+      steps: t.steps, health_note: `Adapt portions to your needs. ${profile.goal === 'Lower sodium' ? 'No added salt; check package sodium.' : 'General meal inspiration, not a nutrition calculation.'}`,
+      tags: [matched.length === 1 ? 'Simple snack or side' : 'From your inventory'],
+    }, items, profile)];
+  });
+  const score = r => {
+    const matched = r.ingredients.map(x => available.find(i => i.id === x.item_id));
+    return matched.length * 2 + matched.filter(i => (daysLeft(i) ?? Infinity) <= 3).length * 3
+      + (profile.goal === 'More vegetables' ? matched.filter(i => i.category === 'Vegetables').length * 4 : 0)
+      + (profile.goal === 'More protein' ? matched.filter(i => /egg|chicken|tofu|salmon|yogurt|lentil|bean/i.test(i.name)).length * 4 : 0);
+  };
+  recipes.sort((a, b) => score(b) - score(a));
+  return recipes;
 }
 export function demoRecipes(items, profile) {
+  const rules = ruleRecipes(items, profile);
+  if (rules.length) return rules.slice(0, 3);
   const available = eligibleItems(items, profile).sort((a, b) => daysLeft(a) - daysLeft(b));
   const find = re => available.find(i => re.test(i.name));
   const templates = [
@@ -122,8 +152,8 @@ export function demoRecipes(items, profile) {
   if (!recipes.length && available.length) {
     const i = available[0];
     recipes.push(validateRecipe({
-      title: `Use-first plan: ${i.name}`, description: 'A simple starting point using your earliest-dated food.',
-      minutes: 15, servings: 1, ingredients: [{ item_id: i.id, quantity: Number(i.quantity), unit: i.unit }],
+      title: `Kitchen idea: ${i.name}`, description: 'A simple starting point using food you have reviewed.',
+      minutes: 15, servings: 1, ingredients: [{ item_id: i.id, quantity: Math.min(Number(i.quantity), ({ pcs: 1, g: 100, kg: 0.1, ml: 150, L: 0.15, packs: 0.5 })[i.unit]), unit: i.unit }],
       steps: ['Verify the label, storage history, and condition before preparation.', 'Prepare according to the package directions or a trusted recipe. This demo does not determine cooking temperatures or food safety.'],
       health_note: 'This is an inventory suggestion, not a nutritionally complete meal.', tags: ['Use first'],
     }, items, profile));
